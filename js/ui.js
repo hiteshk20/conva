@@ -1,21 +1,21 @@
 /**
- * UI.js - Version 2.0
- * Enhanced UI with alignment tools, history controls, and multi-selection
+ * UI.js - Version 5.0 "Enterprise"
+ * Full-featured Property Panel, Dark Mode, and Canvas Presets
  */
 
 export class UI {
     constructor(engine) {
         this.engine = engine;
+        this.isDarkMode = false;
         this.init();
     }
 
     init() {
         this.setupAssetLibrary();
-        this.setupPropertyBar();
-        this.setupLayersPanel();
+        this.setupPropertyPanel();
         this.setupCanvasEvents();
         this.setupToolbar();
-        this.setupAlignmentTools();
+        this.setupPresets();
     }
 
     setupAssetLibrary() {
@@ -27,14 +27,11 @@ export class UI {
             { id: 'star', label: 'Star', icon: '⭐' },
             { id: 'text', label: 'Text', icon: 'T' },
         ];
-
         shapes.forEach(s => {
             const btn = document.createElement('button');
             btn.className = 'flex items-center p-3 hover:bg-gray-100 rounded-lg transition-all w-full text-left gap-3 text-gray-700';
             btn.innerHTML = `<span>${s.icon}</span> <span class="text-sm font-medium">${s.label}</span>`;
-            btn.onclick = () => {
-                this.engine.addObject({ type: s.id, text: s.id === 'text' ? 'New Text' : '' });
-            };
+            btn.onclick = () => this.engine.addObject({ type: s.id, text: s.id === 'text' ? 'New Text' : '' });
             shapeContainer.appendChild(btn);
         });
 
@@ -44,14 +41,8 @@ export class UI {
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (event) => {
-                    const imgObj = this.engine.addObject({
-                        type: 'image',
-                        imageSource: event.target.result,
-                        width: 200,
-                        height: 200
-                    });
-                    const img = new Image();
-                    img.src = event.target.result;
+                    const imgObj = this.engine.addObject({ type: 'image', imageSource: event.target.result, width: 200, height: 200 });
+                    const img = new Image(); img.src = event.target.result;
                     img.onload = () => { imgObj._imgElement = img; };
                 };
                 reader.readAsDataURL(file);
@@ -69,104 +60,85 @@ export class UI {
         });
     }
 
-    setupPropertyBar() {
-        this.updatePropertyBar();
+    setupPropertyPanel() {
+        this.updatePropertyPanel();
     }
 
-    updatePropertyBar() {
+    updatePropertyPanel() {
         const selectedId = Array.from(this.engine.selectedIds)[0];
         const obj = this.engine.sceneGraph.find(o => o.id === selectedId);
         
         const controls = {
+            x: document.getElementById('prop-x'),
+            y: document.getElementById('prop-y'),
+            w: document.getElementById('prop-w'),
+            h: document.getElementById('prop-h'),
             color: document.getElementById('prop-color'),
+            opacity: document.getElementById('prop-opacity'),
+            text: document.getElementById('prop-text-input'),
             fontSize: document.getElementById('prop-font-size'),
             fontFamily: document.getElementById('prop-font-family'),
             textAlign: document.getElementById('prop-text-align'),
-            textInput: document.getElementById('prop-text-input'),
-            opacity: document.getElementById('prop-opacity')
+            grad: document.getElementById('prop-gradient')
         };
 
-        const textControls = document.getElementById('text-controls');
-        const generalControls = document.getElementById('general-controls');
+        const general = document.getElementById('general-controls');
+        const text = document.getElementById('text-controls');
 
         if (obj) {
-            generalControls.classList.remove('hidden');
+            general.classList.remove('hidden');
+            controls.x.value = Math.round(obj.x);
+            controls.y.value = Math.round(obj.y);
+            controls.w.value = Math.round(obj.width);
+            controls.h.value = Math.round(obj.height);
             controls.color.value = obj.color;
-            controls.opacity.value = obj.opacity || 1;
+            controls.opacity.value = obj.opacity;
+            controls.grad.value = obj.gradient ? 'linear' : 'none';
             
             if (obj.type === 'text') {
-                textControls.classList.remove('hidden');
+                text.classList.remove('hidden');
+                controls.text.value = obj.text;
                 controls.fontSize.value = obj.fontSize;
                 controls.fontFamily.value = obj.fontFamily;
                 controls.textAlign.value = obj.textAlign;
-                controls.textInput.value = obj.text;
             } else {
-                textControls.classList.add('hidden');
+                text.classList.add('hidden');
             }
         } else {
-            generalControls.classList.add('hidden');
-            textControls.classList.add('hidden');
+            general.classList.add('hidden');
+            text.classList.add('hidden');
         }
     }
 
     bindPropertyEvents() {
         const controls = {
-            color: document.getElementById('prop-color'),
-            fontSize: document.getElementById('prop-font-size'),
-            fontFamily: document.getElementById('prop-font-family'),
-            textAlign: document.getElementById('prop-text-align'),
-            textInput: document.getElementById('prop-text-input'),
-            opacity: document.getElementById('prop-opacity')
+            x: document.getElementById('prop-x'), y: document.getElementById('prop-y'),
+            w: document.getElementById('prop-w'), h: document.getElementById('prop-h'),
+            color: document.getElementById('prop-color'), opacity: document.getElementById('prop-opacity'),
+            text: document.getElementById('prop-text-input'), fontSize: document.getElementById('prop-font-size'),
+            fontFamily: document.getElementById('prop-font-family'), textAlign: document.getElementById('prop-text-align'),
+            grad: document.getElementById('prop-gradient')
         };
 
-        controls.color.oninput = (e) => this.updateSelected('color', e.target.value);
-        controls.fontSize.oninput = (e) => this.updateSelected('fontSize', parseInt(e.target.value));
-        controls.fontFamily.onchange = (e) => this.updateSelected('fontFamily', e.target.value);
-        controls.textAlign.onchange = (e) => this.updateSelected('textAlign', e.target.value);
-        controls.textInput.oninput = (e) => this.updateSelected('text', e.target.value);
-        controls.opacity.oninput = (e) => this.updateSelected('opacity', parseFloat(e.target.value));
-    }
+        const update = (prop, val) => {
+            this.engine.selectedIds.forEach(id => this.engine.updateObject(id, { [prop]: val }));
+            this.engine.saveState();
+        };
 
-    updateSelected(prop, value) {
-        this.engine.selectedIds.forEach(id => {
-            this.engine.updateObject(id, { [prop]: value });
-        });
-        this.engine.saveState();
-    }
-
-    setupLayersPanel() {
-        this.layersPanel = document.getElementById('layers-list');
-    }
-
-    updateLayersPanel() {
-        this.layersPanel.innerHTML = '';
-        const sorted = [...this.engine.sceneGraph].sort((a, b) => b.zIndex - a.zIndex);
-        sorted.forEach(obj => {
-            const item = document.createElement('div');
-            const isSelected = this.engine.selectedIds.has(obj.id);
-            item.className = `flex items-center justify-between p-2 mb-1 rounded cursor-pointer transition-all ${isSelected ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-50 text-gray-600'}`;
-            item.innerHTML = `
-                <div class="flex items-center gap-2 text-xs font-medium truncate">
-                    <span>${this.getIcon(obj.type)}</span>
-                    <span class="truncate">${obj.type} ${obj.text ? ': ' + obj.text.substring(0, 10) : ''}</span>
-                </div>
-                <div class="flex gap-1">
-                    <button class="p-1 hover:bg-gray-200 rounded" onclick="event.stopPropagation(); window.moveLayer('${obj.id}', 'front')">↑</button>
-                    <button class="p-1 hover:bg-gray-200 rounded" onclick="event.stopPropagation(); window.moveLayer('${obj.id}', 'back')">↓</button>
-                    <button class="p-1 hover:bg-red-100 text-red-500 rounded" onclick="event.stopPropagation(); window.deleteLayer('${obj.id}')">✕</button>
-                </div>
-            `;
-            item.onclick = () => {
-                if (!window.event.shiftKey) this.engine.selectedIds.clear();
-                this.engine.selectedIds.add(obj.id);
-            };
-            this.layersPanel.appendChild(item);
-        });
-    }
-
-    getIcon(type) {
-        const icons = { rect: '⬜', circle: '◯', triangle: '△', star: '⭐', text: 'T', image: '🖼️' };
-        return icons[type] || '📦';
+        controls.x.oninput = (e) => update('x', parseInt(e.target.value));
+        controls.y.oninput = (e) => update('y', parseInt(e.target.value));
+        controls.w.oninput = (e) => update('width', parseInt(e.target.value));
+        controls.h.oninput = (e) => update('height', parseInt(e.target.value));
+        controls.color.oninput = (e) => update('color', e.target.value);
+        controls.opacity.oninput = (e) => update('opacity', parseFloat(e.target.value));
+        controls.text.oninput = (e) => update('text', e.target.value);
+        controls.fontSize.oninput = (e) => update('fontSize', parseInt(e.target.value));
+        controls.fontFamily.onchange = (e) => update('fontFamily', e.target.value);
+        controls.textAlign.onchange = (e) => update('textAlign', e.target.value);
+        controls.grad.onchange = (e) => {
+            const val = e.target.value === 'linear' ? { type: 'linear', colors: ['#3b82f6', '#93c5fd'] } : null;
+            update('gradient', val);
+        };
     }
 
     setupCanvasEvents() {
@@ -180,40 +152,57 @@ export class UI {
             this.engine.handleMouseMove(e.clientX - rect.left, e.clientY - rect.top);
         };
         window.onmouseup = () => this.engine.handleMouseUp();
-        
-        // Zooming
         canvas.onwheel = (e) => {
             e.preventDefault();
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            this.engine.zoom *= delta;
+            this.engine.zoom *= (e.deltaY > 0 ? 0.9 : 1.1);
             this.engine.zoom = Math.max(0.1, Math.min(5, this.engine.zoom));
         };
     }
 
     setupToolbar() {
         document.getElementById('export-btn').onclick = () => this.engine.exportToPNG();
-        document.getElementById('clear-btn').onclick = () => {
-            if (confirm('Clear all objects?')) {
-                this.engine.sceneGraph = [];
-                this.engine.selectedIds.clear();
-                this.engine.saveState();
-            }
-        };
         document.getElementById('undo-btn').onclick = () => this.engine.undo();
         document.getElementById('redo-btn').onclick = () => this.engine.redo();
+        document.getElementById('group-btn').onclick = () => this.engine.groupSelected();
+        document.getElementById('ungroup-btn').onclick = () => this.engine.ungroupSelected();
+        document.getElementById('save-btn').onclick = () => this.engine.exportJSON();
+        document.getElementById('load-btn').onclick = () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = (ev) => this.engine.importJSON(ev.target.result);
+                reader.readAsText(file);
+            };
+            input.click();
+        };
+        document.getElementById('dark-mode').onclick = () => {
+            this.isDarkMode = !this.isDarkMode;
+            document.body.classList.toggle('dark-theme');
+        };
+        document.getElementById('snap-grid').onclick = (e) => {
+            this.engine.snapToGrid = e.target.checked;
+        };
     }
 
-    setupAlignmentTools() {
-        const alignBtns = {
-            'align-left': 'left',
-            'align-center': 'center',
-            'align-right': 'right',
-            'align-top': 'top',
-            'align-middle': 'middle',
-            'align-bottom': 'bottom'
+    setupPresets() {
+        const presets = {
+            'Instagram': [1080, 1080],
+            'YouTube': [1920, 1080],
+            'A4': [595, 842],
+            'BusinessCard': [1050, 600]
         };
-        Object.entries(alignBtns).forEach(([id, type]) => {
-            document.getElementById(id).onclick = () => this.engine.alignSelected(type);
+        const container = document.getElementById('preset-container');
+        Object.entries(presets).forEach(([name, size]) => {
+            const btn = document.createElement('button');
+            btn.className = 'p-2 text-xs bg-gray-100 hover:bg-gray-200 rounded mb-1 w-full text-left px-3 text-gray-600';
+            btn.innerText = `${name} (${size[0]}x${size[1]})`;
+            btn.onclick = () => {
+                this.engine.virtualWidth = size[0];
+                this.engine.virtualHeight = size[1];
+            };
+            container.appendChild(btn);
         });
     }
 }
