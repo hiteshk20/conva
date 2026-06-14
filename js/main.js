@@ -1,6 +1,6 @@
 /**
- * Main.js - Version 2.0
- * Orchestrates the DesignStudio v2 application
+ * Main.js - Version 5.0 "Enterprise"
+ * Orchestrates the full-featured DesignStudio v5
  */
 
 import Templates from './templates.js';
@@ -13,9 +13,8 @@ window.addEventListener('DOMContentLoaded', () => {
     
     ui.bindPropertyEvents();
 
-    // Global helpers
-    window.loadTemplate = (templateKey) => {
-        const template = Templates[templateKey];
+    window.loadTemplate = (key) => {
+        const template = Templates[key];
         if (template) {
             engine.sceneGraph = [];
             template.forEach(obj => engine.addObject(obj));
@@ -23,60 +22,23 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    window.moveLayer = (id, direction) => {
-        if (direction === 'front') engine.bringToFront(id);
-        else engine.sendToBack(id);
-    };
-
-    window.deleteLayer = (id) => {
-        engine.selectedIds.clear();
-        engine.selectedIds.add(id);
-        engine.removeObjects();
-    };
-
-    // Keyboard Shortcuts
     window.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-
         if (e.key === 'Delete' || e.key === 'Backspace') {
-            engine.removeObjects();
+            engine.sceneGraph = engine.sceneGraph.filter(o => !engine.selectedIds.has(o.id));
+            engine.selectedIds.clear();
+            engine.saveState();
         } else if (e.ctrlKey && e.key === 'z') {
-            e.preventDefault();
-            engine.undo();
+            e.preventDefault(); engine.undo();
         } else if (e.ctrlKey && e.key === 'y') {
-            e.preventDefault();
-            engine.redo();
-        } else if (e.key === 'ArrowLeft') {
-            engine.selectedIds.forEach(id => {
-                const obj = engine.sceneGraph.find(o => o.id === id);
-                if (obj) obj.x -= 1;
-            });
-        } else if (e.key === 'ArrowRight') {
-            engine.selectedIds.forEach(id => {
-                const obj = engine.sceneGraph.find(o => o.id === id);
-                if (obj) obj.x += 1;
-            });
-        } else if (e.key === 'ArrowUp') {
-            engine.selectedIds.forEach(id => {
-                const obj = engine.sceneGraph.find(o => o.id === id);
-                if (obj) obj.y -= 1;
-            });
-        } else if (e.key === 'ArrowDown') {
-            engine.selectedIds.forEach(id => {
-                const obj = engine.sceneGraph.find(o => o.id === id);
-                if (obj) obj.y += 1;
-            });
+            e.preventDefault(); engine.redo();
         }
     });
 
-    // Sync UI loop
-    const syncLoop = () => {
-        ui.updatePropertyBar();
-        ui.updateLayersPanel();
-        requestAnimationFrame(syncLoop);
+    const sync = () => {
+        ui.updatePropertyPanel();
+        requestAnimationFrame(sync);
     };
-    syncLoop();
-    
-    // Initial State
+    sync();
     engine.saveState();
 });
