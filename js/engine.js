@@ -1,6 +1,6 @@
 /**
- * Engine.js - Version 2.0
- * Enhanced rendering, history management, and advanced transformations
+ * Engine.js - Version 5.0 "Enterprise"
+ * The ultimate rendering engine with Grouping, Gradients, Grid-Snapping, and Virtual Canvas
  */
 
 export class Engine {
@@ -8,20 +8,26 @@ export class Engine {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
         this.sceneGraph = [];
-        this.selectedIds = new Set(); // Support for multi-select
+        this.selectedIds = new Set();
         
-        // State for interaction
+        // Interaction State
         this.isDragging = false;
         this.isResizing = false;
         this.isRotating = false;
         this.activeHandle = null;
         this.dragOffset = { x: 0, y: 0 };
         
-        // Viewport state
+        // Viewport & Grid
         this.zoom = 1.0;
         this.pan = { x: 0, y: 0 };
+        this.gridSize = 20;
+        this.snapToGrid = true;
         
-        // History for Undo/Redo
+        // Canvas Dimensions (Virtual)
+        this.virtualWidth = 1200;
+        this.virtualHeight = 800;
+        
+        // History
         this.history = [];
         this.historyIndex = -1;
 
@@ -43,9 +49,8 @@ export class Engine {
         if (this.historyIndex < this.history.length - 1) {
             this.history = this.history.slice(0, this.historyIndex + 1);
         }
-        const snapshot = JSON.stringify(this.sceneGraph);
-        this.history.push(snapshot);
-        if (this.history.length > 50) this.history.shift();
+        this.history.push(JSON.stringify(this.sceneGraph));
+        if (this.history.length > 100) this.history.shift();
         this.historyIndex = this.history.length - 1;
     }
 
@@ -77,25 +82,20 @@ export class Engine {
         requestAnimationFrame(render);
     }
 
+    // --- Object Management ---
+
     addObject(obj) {
         const id = 'obj_' + Date.now() + Math.random().toString(36).substr(2, 9);
         const newObj = {
             id,
             type: 'rect',
-            x: 100,
-            y: 100,
-            width: 100,
-            height: 100,
-            rotation: 0,
-            color: '#3b82f6',
-            text: 'New Text',
-            fontSize: 24,
-            fontFamily: 'Arial',
-            textAlign: 'center',
+            x: 100, y: 100, width: 100, height: 100,
+            rotation: 0, color: '#3b82f6', 
+            gradient: null, // {type: 'linear', colors: ['#start', '#end']}
+            opacity: 1, zIndex: this.sceneGraph.length,
+            visible: true, locked: false,
+            text: 'New Text', fontSize: 24, fontFamily: 'Arial', textAlign: 'center',
             imageSource: null,
-            zIndex: this.sceneGraph.length,
-            visible: true,
-            opacity: 1,
             ...obj
         };
         this.sceneGraph.push(newObj);
@@ -103,171 +103,180 @@ export class Engine {
         return newObj;
     }
 
-    removeObjects() {
-        if (this.selectedIds.size === 0) return;
-        this.sceneGraph = this.sceneGraph.filter(obj => !this.selectedIds.has(obj.id));
+    groupSelected() {
+        if (this.selectedIds.size < 2) return;
+        
+        const selected = this.sceneGraph.filter(o => this.selectedIds.has(o.id));
+        const minX = Math.min(...selected.map(o => o.x));
+        const minY = Math.min(...selected.map(o => o.y));
+        const maxX = Math.max(...selected.map(o => o.x + o.width));
+        const maxY = Math.max(...selected.map(o => o.y + o.height));
+        
+        const group = this.addObject({
+            type: 'group',
+            x: minX, y: minY,
+            width: maxX - minX, height: maxY - minY,
+            children: selected.map(o => ({...o, x: o.x - minX, y: o.y - minY}))
+        });
+        
+        this.sceneGraph = this.sceneGraph.filter(o => !this.selectedIds.has(o.id));
+        this.selectedIds.clear();
+        this.selectedIds.add(group.id);
+        this.saveState();
+    }
+
+    ungroupSelected() {
+        const selected = this.sceneGraph.filter(o => this.selectedIds.has(o.id));
+        selected.forEach(group => {
+            if (group.type === 'group') {
+                group.children.forEach(child => {
+                    const worldObj = {...child, x: child.x + group.x, y: child.y + group.y};
+                    this.sceneGraph.push(worldObj);
+                });
+                this.sceneGraph = this.sceneGraph.filter(o => o.id !== group.id);
+            }
+        });
         this.selectedIds.clear();
         this.saveState();
     }
 
     updateObject(id, props) {
         const obj = this.sceneGraph.find(o => o.id === id);
-        if (obj) {
-            Object.assign(obj, props);
-        }
+        if (obj) Object.assign(obj, props);
     }
 
-    alignSelected(type) {
-        if (this.selectedIds.size < 2) return;
-        const selected = this.sceneGraph.filter(o => this.selectedIds.has(o.id));
-        if (type === 'left') {
-            const minX = Math.min(...selected.map(o => o.x));
-            selected.forEach(o => o.x = minX);
-        } else if (type === 'center') {
-            const centerX = selected.reduce((sum, o) => sum + (o.x + o.width/2), 0) / selected.length;
-            selected.forEach(o => o.x = centerX - o.width/2);
-        } else if (type === 'right') {
-            const maxX = Math.max(...selected.map(o => o.x + o.width));
-            selected.forEach(o => o.x = maxX - o.width);
-        } else if (type === 'top') {
-            const minY = Math.min(...selected.map(o => o.y));
-            selected.forEach(o => o.y = minY);
-        } else if (type === 'middle') {
-            const centerY = selected.reduce((sum, o) => sum + (o.y + o.height/2), 0) / selected.length;
-            selected.forEach(o => o.y = centerY - o.height/2);
-        } else if (type === 'bottom') {
-            const maxY = Math.max(...selected.map(o => o.y + o.height));
-            selected.forEach(o => o.y = maxY - o.height);
-        }
-        this.saveState();
-    }
-
-    bringToFront(id) {
-        const obj = this.sceneGraph.find(o => o.id === id);
-        if (obj) {
-            const maxZ = Math.max(...this.sceneGraph.map(o => o.zIndex), 0);
-            obj.zIndex = maxZ + 1;
-            this.saveState();
-        }
-    }
-
-    sendToBack(id) {
-        const obj = this.sceneGraph.find(o => o.id === id);
-        if (obj) {
-            const minZ = Math.min(...this.sceneGraph.map(o => o.zIndex), 0);
-            obj.zIndex = minZ - 1;
-            this.saveState();
-        }
-    }
+    // --- Rendering ---
 
     draw() {
         this.ctx.clearRect(0, 0, this.width, this.height);
+        
         this.ctx.save();
         this.ctx.translate(this.pan.x, this.pan.y);
         this.ctx.scale(this.zoom, this.zoom);
-        const sortedGraph = [...this.sceneGraph].sort((a, b) => a.zIndex - b.zIndex);
-        sortedGraph.forEach(obj => {
-            if (!obj.visible) return;
-            this.drawObject(obj);
+
+        // Draw Virtual Canvas Background
+        this.ctx.fillStyle = 'white';
+        this.ctx.fillRect(0, 0, this.virtualWidth, this.virtualHeight);
+        this.ctx.strokeStyle = '#cbd5e1';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(0, 0, this.virtualWidth, this.virtualHeight);
+
+        const sorted = [...this.sceneGraph].sort((a, b) => a.zIndex - b.zIndex);
+        sorted.forEach(obj => {
+            if (obj.visible) this.drawRecursive(obj);
         });
+
         this.selectedIds.forEach(id => {
             const obj = this.sceneGraph.find(o => o.id === id);
             if (obj) this.drawSelectionUI(obj);
         });
+
         this.ctx.restore();
     }
 
-    drawObject(obj) {
+    drawRecursive(obj) {
         this.ctx.save();
-        this.ctx.globalAlpha = obj.opacity || 1;
+        this.ctx.globalAlpha = obj.opacity;
+        
         const centerX = obj.x + obj.width / 2;
         const centerY = obj.y + obj.height / 2;
         this.ctx.translate(centerX, centerY);
         this.ctx.rotate((obj.rotation * Math.PI) / 180);
         this.ctx.translate(-centerX, -centerY);
+
+        if (obj.type === 'group') {
+            obj.children.forEach(child => {
+                this.ctx.save();
+                this.ctx.translate(obj.x, obj.y); // Simple nested translate
+                this.drawRecursive({...child, x: child.x, y: child.y});
+                this.ctx.restore();
+            });
+        } else {
+            this.renderPrimitive(obj, centerX, centerY);
+        }
+        this.ctx.restore();
+    }
+
+    renderPrimitive(obj, cx, cy) {
         this.ctx.fillStyle = obj.color;
-        this.ctx.strokeStyle = obj.color;
+        
+        // Gradient Logic
+        if (obj.gradient && obj.gradient.colors) {
+            const grad = this.ctx.createLinearGradient(obj.x, obj.y, obj.x, obj.y + obj.height);
+            obj.gradient.colors.forEach((c, i) => grad.addColorStop(i / (obj.gradient.colors.length - 1), c));
+            this.ctx.fillStyle = grad;
+        }
+
         if (obj.type === 'rect') {
             this.ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
         } else if (obj.type === 'circle') {
             this.ctx.beginPath();
-            this.ctx.arc(centerX, centerY, Math.abs(obj.width / 2), 0, Math.PI * 2);
+            this.ctx.arc(cx, cy, Math.abs(obj.width / 2), 0, Math.PI * 2);
             this.ctx.fill();
         } else if (obj.type === 'triangle') {
             this.ctx.beginPath();
-            this.ctx.moveTo(centerX, obj.y);
+            this.ctx.moveTo(cx, obj.y);
             this.ctx.lineTo(obj.x + obj.width, obj.y + obj.height);
             this.ctx.lineTo(obj.x, obj.y + obj.height);
             this.ctx.closePath();
             this.ctx.fill();
         } else if (obj.type === 'star') {
-            this.drawStar(centerX, centerY, 5, obj.width/2, obj.width/4);
+            this.drawStar(cx, cy, 5, obj.width/2, obj.width/4);
         } else if (obj.type === 'text') {
             this.ctx.font = `${obj.fontSize}px ${obj.fontFamily}`;
             this.ctx.textAlign = obj.textAlign;
             this.ctx.textBaseline = 'top';
-            const textX = obj.textAlign === 'center' ? centerX : (obj.textAlign === 'right' ? obj.x + obj.width : obj.x);
-            this.ctx.fillText(obj.text, textX, obj.y);
-            const metrics = this.ctx.measureText(obj.text);
-            obj.width = metrics.width;
-            obj.height = obj.fontSize;
-        } else if (obj.type === 'image' && obj.imageSource) {
-            if (obj._imgElement) {
-                this.ctx.drawImage(obj._imgElement, obj.x, obj.y, obj.width, obj.height);
-            }
+            const tx = obj.textAlign === 'center' ? cx : (obj.textAlign === 'right' ? obj.x + obj.width : obj.x);
+            this.ctx.fillText(obj.text, tx, obj.y);
+            const m = this.ctx.measureText(obj.text);
+            obj.width = m.width; obj.height = obj.fontSize;
+        } else if (obj.type === 'image' && obj._imgElement) {
+            this.ctx.drawImage(obj._imgElement, obj.x, obj.y, obj.width, obj.height);
         }
-        this.ctx.restore();
     }
 
-    drawStar(cx, cy, spikes, outerRadius, innerRadius) {
+    drawStar(cx, cy, spikes, outer, inner) {
         let rot = Math.PI / 2 * 3;
-        let x = cx;
-        let y = cy;
-        let step = Math.PI / spikes;
+        let x = cx, y = cy, step = Math.PI / spikes;
         this.ctx.beginPath();
-        this.ctx.moveTo(cx, cy - outerRadius);
+        this.ctx.moveTo(cx, cy - outer);
         for (let i = 0; i < spikes; i++) {
-            x = cx + Math.cos(rot) * outerRadius;
-            y = cy + Math.sin(rot) * outerRadius;
-            this.ctx.lineTo(x, y);
-            rot += step;
-            x = cx + Math.cos(rot) * innerRadius;
-            y = cy + Math.sin(rot) * innerRadius;
-            this.ctx.lineTo(x, y);
-            rot += step;
+            x = cx + Math.cos(rot) * outer; y = cy + Math.sin(rot) * outer;
+            this.ctx.lineTo(x, y); rot += step;
+            x = cx + Math.cos(rot) * inner; y = cy + Math.sin(rot) * inner;
+            this.ctx.lineTo(x, y); rot += step;
         }
-        this.ctx.lineTo(cx, cy - outerRadius);
         this.ctx.closePath();
         this.ctx.fill();
     }
 
     drawSelectionUI(obj) {
         this.ctx.save();
-        const centerX = obj.x + obj.width / 2;
-        const centerY = obj.y + obj.height / 2;
-        this.ctx.translate(centerX, centerY);
+        const cx = obj.x + obj.width / 2, cy = obj.y + obj.height / 2;
+        this.ctx.translate(cx, cy);
         this.ctx.rotate((obj.rotation * Math.PI) / 180);
-        this.ctx.translate(-centerX, -centerY);
+        this.ctx.translate(-cx, -cy);
+
         this.ctx.strokeStyle = '#3b82f6';
         this.ctx.lineWidth = 2;
         this.ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+
         const hs = 8;
         const handles = this.getHandlePositions(obj);
         this.ctx.fillStyle = 'white';
         this.ctx.strokeStyle = '#3b82f6';
         this.ctx.lineWidth = 1;
-        for (const h of handles) {
+        handles.forEach(h => {
             this.ctx.fillRect(h.x - hs/2, h.y - hs/2, hs, hs);
             this.ctx.strokeRect(h.x - hs/2, h.y - hs/2, hs, hs);
-        }
-        const rotX = centerX;
-        const rotY = obj.y - 20;
+        });
+
         this.ctx.beginPath();
-        this.ctx.moveTo(centerX, obj.y);
-        this.ctx.lineTo(rotX, rotY);
+        this.ctx.moveTo(cx, obj.y);
+        this.ctx.lineTo(cx, obj.y - 20);
         this.ctx.stroke();
         this.ctx.beginPath();
-        this.ctx.arc(rotX, rotY, hs/2, 0, Math.PI * 2);
+        this.ctx.arc(cx, obj.y - 20, hs/2, 0, Math.PI * 2);
         this.ctx.fill();
         this.ctx.stroke();
         this.ctx.restore();
@@ -275,34 +284,21 @@ export class Engine {
 
     getHandlePositions(obj) {
         return [
-            { id: 'tl', x: obj.x, y: obj.y },
-            { id: 'tm', x: obj.x + obj.width / 2, y: obj.y },
-            { id: 'tr', x: obj.x + obj.width, y: obj.y },
-            { id: 'ml', x: obj.x, y: obj.y + obj.height / 2 },
-            { id: 'mr', x: obj.x + obj.width, y: obj.y + obj.height / 2 },
-            { id: 'bl', x: obj.x, y: obj.y + obj.height },
-            { id: 'bm', x: obj.x + obj.width / 2, y: obj.y + obj.height },
-            { id: 'br', x: obj.x + obj.width, y: obj.y + obj.height },
+            { id: 'tl', x: obj.x, y: obj.y }, { id: 'tm', x: obj.x + obj.width/2, y: obj.y }, { id: 'tr', x: obj.x + obj.width, y: obj.y },
+            { id: 'ml', x: obj.x, y: obj.y + obj.height/2 }, { id: 'mr', x: obj.x + obj.width, y: obj.y + obj.height/2 },
+            { id: 'bl', x: obj.x, y: obj.y + obj.height }, { id: 'bm', x: obj.x + obj.width/2, y: obj.y + obj.height }, { id: 'br', x: obj.x + obj.width, y: obj.y + obj.height },
         ];
     }
 
     localPoint(px, py) {
-        return {
-            x: (px - this.pan.x) / this.zoom,
-            y: (py - this.pan.y) / this.zoom
-        };
+        return { x: (px - this.pan.x) / this.zoom, y: (py - this.pan.y) / this.zoom };
     }
 
     objectLocalPoint(px, py, obj) {
-        const centerX = obj.x + obj.width / 2;
-        const centerY = obj.y + obj.height / 2;
+        const cx = obj.x + obj.width / 2, cy = obj.y + obj.height / 2;
         const angle = -(obj.rotation * Math.PI) / 180;
-        const dx = px - centerX;
-        const dy = py - centerY;
-        return {
-            x: dx * Math.cos(angle) - dy * Math.sin(angle) + centerX,
-            y: dx * Math.sin(angle) + dy * Math.cos(angle) + centerY
-        };
+        const dx = px - cx, dy = py - cy;
+        return { x: dx * Math.cos(angle) - dy * Math.sin(angle) + cx, y: dx * Math.sin(angle) + dy * Math.cos(angle) + cy };
     }
 
     hitTest(px, py) {
@@ -310,113 +306,97 @@ export class Engine {
         for (const obj of sorted) {
             if (!obj.visible) continue;
             const lp = this.objectLocalPoint(px, py, obj);
-            if (lp.x >= obj.x && lp.x <= obj.x + obj.width &&
-                lp.y >= obj.y && lp.y <= obj.y + obj.height) {
-                return obj;
-            }
+            if (lp.x >= obj.x && lp.x <= obj.x + obj.width && lp.y >= obj.y && lp.y <= obj.y + obj.height) return obj;
         }
         return null;
     }
 
     handleMouseDown(px, py, isShift) {
-        const worldPt = this.localPoint(px, py);
+        const wp = this.localPoint(px, py);
         if (this.selectedIds.size > 0) {
             for (const id of this.selectedIds) {
                 const obj = this.sceneGraph.find(o => o.id === id);
                 if (!obj) continue;
-                const lp = this.objectLocalPoint(worldPt.x, worldPt.y, obj);
+                const lp = this.objectLocalPoint(wp.x, wp.y, obj);
                 const handles = this.getHandlePositions(obj);
                 for (const h of handles) {
                     if (Math.abs(lp.x - h.x) < 10 && Math.abs(lp.y - h.y) < 10) {
-                        this.isResizing = true;
-                        this.activeHandle = h.id;
-                        this.selectedIds.clear();
-                        this.selectedIds.add(id);
+                        this.isResizing = true; this.activeHandle = h.id;
+                        this.selectedIds.clear(); this.selectedIds.add(id);
                         return;
                     }
                 }
-                const rotX = obj.x + obj.width / 2;
-                const rotY = obj.y - 20;
-                if (Math.abs(lp.x - rotX) < 10 && Math.abs(lp.y - rotY) < 10) {
-                    this.isRotating = true;
-                    this.selectedIds.clear();
-                    this.selectedIds.add(id);
+                if (Math.abs(lp.x - (obj.x + obj.width/2)) < 10 && Math.abs(lp.y - (obj.y - 20)) < 10) {
+                    this.isRotating = true; this.selectedIds.clear(); this.selectedIds.add(id);
                     return;
                 }
             }
         }
-        const hit = this.hitTest(worldPt.x, worldPt.y);
+
+        const hit = this.hitTest(wp.x, wp.y);
         if (hit) {
             if (!isShift) this.selectedIds.clear();
             this.selectedIds.add(hit.id);
             this.isDragging = true;
-            this.dragOffset = {
-                x: worldPt.x - hit.x,
-                y: worldPt.y - hit.y
-            };
-        } else {
-            if (!isShift) this.selectedIds.clear();
+            this.dragOffset = { x: wp.x - hit.x, y: wp.y - hit.y };
+        } else if (!isShift) {
+            this.selectedIds.clear();
         }
     }
 
     handleMouseMove(px, py) {
-        const worldPt = this.localPoint(px, py);
+        const wp = this.localPoint(px, py);
         if (this.selectedIds.size === 0) return;
+
         if (this.isDragging) {
             this.selectedIds.forEach(id => {
                 const obj = this.sceneGraph.find(o => o.id === id);
                 if (obj) {
-                    obj.x = worldPt.x - this.dragOffset.x;
-                    obj.y = worldPt.y - this.dragOffset.y;
+                    let nx = wp.x - this.dragOffset.x;
+                    let ny = wp.y - this.dragOffset.y;
+                    if (this.snapToGrid) {
+                        nx = Math.round(nx / this.gridSize) * this.gridSize;
+                        ny = Math.round(ny / this.gridSize) * this.gridSize;
+                    }
+                    obj.x = nx; obj.y = ny;
                 }
             });
         } else if (this.isResizing) {
             const id = Array.from(this.selectedIds)[0];
             const obj = this.sceneGraph.find(o => o.id === id);
             if (obj) {
-                const lp = this.objectLocalPoint(worldPt.x, worldPt.y, obj);
+                const lp = this.objectLocalPoint(wp.x, wp.y, obj);
                 this.applyResize(lp);
             }
         } else if (this.isRotating) {
             const id = Array.from(this.selectedIds)[0];
             const obj = this.sceneGraph.find(o => o.id === id);
             if (obj) {
-                const centerX = obj.x + obj.width / 2;
-                const centerY = obj.y + obj.height / 2;
-                const angle = Math.atan2(worldPt.y - centerY, worldPt.x - centerX);
-                obj.rotation = (angle * 180 / Math.PI) + 90;
+                const cx = obj.x + obj.width/2, cy = obj.y + obj.height/2;
+                obj.rotation = (Math.atan2(wp.y - cy, wp.x - cx) * 180 / Math.PI) + 90;
             }
         }
     }
 
     applyResize(lp) {
-        const id = Array.from(this.selectedIds)[0];
-        const obj = this.sceneGraph.find(o => o.id === id);
-        const oldX = obj.x;
-        const oldY = obj.y;
-        const oldW = obj.width;
-        const oldH = obj.height;
+        const id = Array.from(this.selectedIds)[0], obj = this.sceneGraph.find(o => o.id === id);
+        const { x, y, width: w, height: h } = obj;
         switch(this.activeHandle) {
-            case 'br': obj.width = lp.x - oldX; obj.height = lp.y - oldY; break;
-            case 'bl': obj.width = oldX + oldW - lp.x; obj.x = lp.x; obj.height = lp.y - oldY; break;
-            case 'tr': obj.width = lp.x - oldX; obj.height = oldY + oldH - lp.y; obj.y = lp.y; break;
-            case 'tl': obj.width = oldX + oldW - lp.x; obj.x = lp.x; obj.height = oldY + oldH - lp.y; obj.y = lp.y; break;
-            case 'tm': obj.height = oldY + oldH - lp.y; obj.y = lp.y; break;
-            case 'bm': obj.height = lp.y - oldY; break;
-            case 'ml': obj.width = oldX + oldW - lp.x; obj.x = lp.x; break;
-            case 'mr': obj.width = lp.x - oldX; break;
+            case 'br': obj.width = lp.x - x; obj.height = lp.y - y; break;
+            case 'bl': obj.width = x + w - lp.x; obj.x = lp.x; obj.height = lp.y - y; break;
+            case 'tr': obj.width = lp.x - x; obj.height = y + h - lp.y; obj.y = lp.y; break;
+            case 'tl': obj.width = x + w - lp.x; obj.x = lp.x; obj.height = y + h - lp.y; obj.y = lp.y; break;
+            case 'tm': obj.height = y + h - lp.y; obj.y = lp.y; break;
+            case 'bm': obj.height = lp.y - y; break;
+            case 'ml': obj.width = x + w - lp.x; obj.x = lp.x; break;
+            case 'mr': obj.width = lp.x - x; break;
         }
-        if (obj.width < 10) { obj.width = 10; obj.x = oldX + (this.activeHandle.includes('l') ? 0 : 10); }
-        if (obj.height < 10) { obj.height = 10; obj.y = oldY + (this.activeHandle.includes('t') ? 0 : 10); }
+        if (obj.width < 10) obj.width = 10; if (obj.height < 10) obj.height = 10;
     }
 
     handleMouseUp() {
-        if (this.isDragging || this.isResizing || this.isRotating) {
-            this.saveState();
-        }
-        this.isDragging = false;
-        this.isResizing = false;
-        this.isRotating = false;
+        if (this.isDragging || this.isResizing || this.isRotating) this.saveState();
+        this.isDragging = this.isResizing = this.isRotating = false;
         this.activeHandle = null;
     }
 
@@ -424,11 +404,28 @@ export class Engine {
         const prevSelected = new Set(this.selectedIds);
         this.selectedIds.clear();
         this.draw();
-        const dataUrl = this.canvas.toDataURL('image/png');
-        this.selectedIds = prevSelected;
         const link = document.createElement('a');
-        link.download = 'design-pro-export.png';
-        link.href = dataUrl;
+        link.download = 'enterprise-design.png';
+        link.href = this.canvas.toDataURL('image/png');
+        link.click();
+        this.selectedIds = prevSelected;
+    }
+
+    importJSON(json) {
+        try {
+            const data = JSON.parse(json);
+            this.sceneGraph = data;
+            this.saveState();
+        } catch(e) { alert('Invalid JSON file'); }
+    }
+
+    exportJSON() {
+        const data = JSON.stringify(this.sceneGraph);
+        const blob = new Blob([data], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = 'project.json';
+        link.href = url;
         link.click();
     }
 }
