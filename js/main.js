@@ -1,5 +1,6 @@
 /**
- * Main.js - Application Bootstrapper
+ * Main.js - Version 2.0
+ * Orchestrates the DesignStudio v2 application
  */
 
 import Templates from './templates.js';
@@ -12,16 +13,13 @@ window.addEventListener('DOMContentLoaded', () => {
     
     ui.bindPropertyEvents();
 
-    // Global helpers for the UI (because they are called from inline HTML strings in UI.js)
+    // Global helpers
     window.loadTemplate = (templateKey) => {
         const template = Templates[templateKey];
         if (template) {
-            // Clear current scene
             engine.sceneGraph = [];
-            // Add template objects
-            template.forEach(obj => {
-                engine.addObject(obj);
-            });
+            template.forEach(obj => engine.addObject(obj));
+            engine.saveState();
         }
     };
 
@@ -31,8 +29,45 @@ window.addEventListener('DOMContentLoaded', () => {
     };
 
     window.deleteLayer = (id) => {
-        engine.removeObject(id);
+        engine.selectedIds.clear();
+        engine.selectedIds.add(id);
+        engine.removeObjects();
     };
+
+    // Keyboard Shortcuts
+    window.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+            engine.removeObjects();
+        } else if (e.ctrlKey && e.key === 'z') {
+            e.preventDefault();
+            engine.undo();
+        } else if (e.ctrlKey && e.key === 'y') {
+            e.preventDefault();
+            engine.redo();
+        } else if (e.key === 'ArrowLeft') {
+            engine.selectedIds.forEach(id => {
+                const obj = engine.sceneGraph.find(o => o.id === id);
+                if (obj) obj.x -= 1;
+            });
+        } else if (e.key === 'ArrowRight') {
+            engine.selectedIds.forEach(id => {
+                const obj = engine.sceneGraph.find(o => o.id === id);
+                if (obj) obj.x += 1;
+            });
+        } else if (e.key === 'ArrowUp') {
+            engine.selectedIds.forEach(id => {
+                const obj = engine.sceneGraph.find(o => o.id === id);
+                if (obj) obj.y -= 1;
+            });
+        } else if (e.key === 'ArrowDown') {
+            engine.selectedIds.forEach(id => {
+                const obj = engine.sceneGraph.find(o => o.id === id);
+                if (obj) obj.y += 1;
+            });
+        }
+    });
 
     // Sync UI loop
     const syncLoop = () => {
@@ -42,26 +77,6 @@ window.addEventListener('DOMContentLoaded', () => {
     };
     syncLoop();
     
-    // Persistence
-    window.onbeforeunload = () => {
-        localStorage.setItem('canva_clone_scene', JSON.stringify(engine.sceneGraph));
-    };
-    
-    const saved = localStorage.getItem('canva_clone_scene');
-    if (saved) {
-        try {
-            const data = JSON.parse(saved);
-            engine.sceneGraph = data;
-            // Re-link image elements if any
-            engine.sceneGraph.forEach(obj => {
-                if (obj.type === 'image' && obj.imageSource) {
-                    const img = new Image();
-                    img.src = obj.imageSource;
-                    img.onload = () => { obj._imgElement = img; };
-                }
-            });
-        } catch(e) {
-            console.error('Failed to load saved scene', e);
-        }
-    }
+    // Initial State
+    engine.saveState();
 });
